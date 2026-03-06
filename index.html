@@ -118,7 +118,11 @@
             canvas.height = size;
             const ctx = canvas.getContext('2d');
 
+            // main RNG drives placement of clocks, tables, eyes, etc.
             const rng = mulberry32(paintingIndex + 12345);
+            // use a separate RNG instance for noise/terrain loops so heavy
+            // iteration doesn't consume the main state
+            const noiseRng = mulberry32(paintingIndex + 99999);
 
             // ===== SKY GRADIENT =====
             const skyPalettes = [
@@ -140,7 +144,8 @@
 
             // ===== SKY NOISE =====
             const skyNoise = (x, y) => {
-                const n = Math.sin(x * 0.05 + y * 0.03 + rng()) * 0.5 + 0.5;
+                // use noiseRng so the main rng state isn't altered by every pixel
+                const n = Math.sin(x * 0.05 + y * 0.03 + noiseRng()) * 0.5 + 0.5;
                 return n;
             };
             for (let y = 0; y < size * 0.4; y++) {
@@ -163,7 +168,8 @@
 
             // ===== TERRAIN HEIGHTMAP =====
             const perlinNoise = (x, y, scale = 0.1) => {
-                return Math.sin(x * scale + rng()) * Math.cos(y * scale + rng()) * 0.5 + 0.5;
+                // perlin-style noise also uses the separate noiseRng
+                return Math.sin(x * scale + noiseRng()) * Math.cos(y * scale + noiseRng()) * 0.5 + 0.5;
             };
 
             const terrainColor = (rng() > 0.5) ? '#3a2810' : '#4a3820';
@@ -338,7 +344,8 @@
                         const targetIdx = (y * size + x) * 4;
                         const imgData = ctx.getImageData(0, sourceY, size, 1).data;
                         
-                        ctx.fillStyle = `rgba(${imgData[0]}, ${imgData[1]}, ${imgData[2]}, ${imgData[3] * (0.25 + rng() * 0.3) / 255})`;
+                        // reflection opacity noise should also come from noiseRng
+                ctx.fillStyle = `rgba(${imgData[0]}, ${imgData[1]}, ${imgData[2]}, ${imgData[3] * (0.25 + noiseRng() * 0.3) / 255})`;
                         ctx.fillRect(x, y, 1, 1);
                     }
                 }
@@ -363,8 +370,16 @@
         camera.position.set(0, 1.7, 0);
 
         // ===== LIGHTING =====
-        const ambientLight = new THREE.AmbientLight(0x1a0f08, 1.2);
+        // ambient light was previously a very dark brown with high intensity which
+        // provided almost no usable illumination for the Lambert materials. switch to
+        // a neutral white and add a fill directional light for better visibility.
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
+
+        // add a gentle directional fill light from above to brighten the corridor
+        const fillLight = new THREE.DirectionalLight(0xffe0a0, 0.8);
+        fillLight.position.set(0, 3, 0);
+        scene.add(fillLight);
 
         // ===== GALLERY CORRIDOR =====
         const corridorWidth = 6;
