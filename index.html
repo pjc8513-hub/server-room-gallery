@@ -116,7 +116,7 @@
             const canvas = document.createElement('canvas');
             canvas.width = size;
             canvas.height = size;
-            const ctx = canvas.getContext('2d');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
             // main RNG drives placement of clocks, tables, eyes, etc.
             const rng = mulberry32(paintingIndex + 12345);
