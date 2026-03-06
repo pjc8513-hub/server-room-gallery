@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Gallery of Forking Paths</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Georgia, serif;
+            overflow: hidden;
+            background: #0a0608;
+        }
+
+        canvas {
+            display: block;
+            cursor: grab;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        .ui-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            font-family: Georgia, serif;
+        }
+
+        .title-overlay {
+            position: fixed;
+            top: 2%;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            color: rgba(255, 220, 150, 0.6);
+            font-size: 18px;
+            letter-spacing: 3px;
+            font-weight: normal;
+            text-transform: uppercase;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .plaque-overlay {
+            position: fixed;
+            bottom: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            color: rgba(255, 220, 150, 0.85);
+            font-size: 14px;
+            letter-spacing: 1.5px;
+            font-style: italic;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            z-index: 20;
+            max-width: 80%;
+            white-space: nowrap;
+        }
+
+        .plaque-overlay.visible {
+            opacity: 1;
+        }
+
+        .controls-hint {
+            position: fixed;
+            bottom: 2%;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            color: rgba(255, 220, 150, 0.7);
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="ui-container">
+        <div class="title-overlay">
+            THE GALLERY OF FORKING PATHS &nbsp;·&nbsp; An Infinite Collection
+        </div>
+        <div class="plaque-overlay" id="plaque"></div>
+        <div class="controls-hint">
+            WASD / Arrow Keys to Move &nbsp;·&nbsp; Mouse to Look &nbsp;·&nbsp; Click to Lock Pointer
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // ===== SEEDED RNG (Mulberry32) =====
+        function mulberry32(a) {
+            return function() {
+                let t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+
+        // ===== PAINTING GENERATOR =====
+        function generatePaintingCanvas(paintingIndex, size = 64) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            const rng = mulberry32(paintingIndex + 12345);
+
+            // ===== SKY GRADIENT =====
+            const skyPalettes = [
+                { top: '#1a0a1f', bottom: '#8b4513' },    // void-amber
+                { top: '#2d0a3d', bottom: '#5a0a3d' },    // bruised purple
+                { top: '#3d0a0a', bottom: '#8b4513' },    // blood horizon
+                { top: '#0a1a3d', bottom: '#daa520' },    // arctic gold
+                { top: '#1f0f2f', bottom: '#6b4423' },    // twilight
+                { top: '#2a0a0a', bottom: '#9d6f2c' },    // burn orange
+                { top: '#0a2a3d', bottom: '#5a8a3d' },    // void-green
+                { top: '#1a0a3d', bottom: '#8a6020' }     // dark gold
+            ];
+            const skyPal = skyPalettes[Math.floor(rng() * skyPalettes.length)];
+            const grad = ctx.createLinearGradient(0, 0, 0, size);
+            grad.addColorStop(0, skyPal.top);
+            grad.addColorStop(1, skyPal.bottom);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, size, size);
+
+            // ===== SKY NOISE =====
+            const skyNoise = (x, y) => {
+                const n = Math.sin(x * 0.05 + y * 0.03 + rng()) * 0.5 + 0.5;
+                return n;
+            };
+            for (let y = 0; y < size * 0.4; y++) {
+                for (let x = 0; x < size; x++) {
+                    const noise = skyNoise(x, y);
+                    const alpha = (1 - y / (size * 0.4)) * 0.15;
+                    ctx.fillStyle = `rgba(255, 255, 255, ${noise * alpha})`;
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            }
+
+            // ===== HORIZON GLOW =====
+            const horizonY = size * 0.5;
+            const glowGrad = ctx.createLinearGradient(0, horizonY - 15, 0, horizonY + 15);
+            glowGrad.addColorStop(0, 'rgba(255, 180, 100, 0)');
+            glowGrad.addColorStop(0.5, 'rgba(255, 150, 50, 0.3)');
+            glowGrad.addColorStop(1, 'rgba(255, 180, 100, 0)');
+            ctx.fillStyle = glowGrad;
+            ctx.fillRect(0, horizonY - 15, size, 30);
+
+            // ===== TERRAIN HEIGHTMAP =====
+            const perlinNoise = (x, y, scale = 0.1) => {
+                return Math.sin(x * scale + rng()) * Math.cos(y * scale + rng()) * 0.5 + 0.5;
+            };
+
+            const terrainColor = (rng() > 0.5) ? '#3a2810' : '#4a3820';
+            ctx.fillStyle = terrainColor;
+            for (let y = Math.floor(horizonY); y < size; y++) {
+                const terrainHeight = perlinNoise(y, 0) * 30;
+                ctx.fillRect(0, y, size, 1);
+            }
+
+            // ===== TERRAIN CRACKS =====
+            if (rng() > 0.4) {
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                const crackCount = Math.floor(rng() * 3) + 1;
+                for (let c = 0; c < crackCount; c++) {
+                    ctx.beginPath();
+                    let x = rng() * size;
+                    let y = horizonY + rng() * (size - horizonY) * 0.5;
+                    ctx.moveTo(x, y);
+                    for (let i = 0; i < 10; i++) {
+                        x += (rng() - 0.5) * 8;
+                        y += rng() * 4;
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            }
+
+            // ===== MELTING CLOCKS =====
+            const clockCount = Math.floor(rng() * 3) + 1;
+            for (let c = 0; c < clockCount; c++) {
+                const clockX = rng() * size;
+                const clockY = horizonY - 10 - rng() * 15;
+                const clockW = rng() * 8 + 5;
+                const clockH = clockW * 0.8;
+
+                // Clock face
+                ctx.fillStyle = '#c9b88f';
+                ctx.beginPath();
+                ctx.ellipse(clockX, clockY, clockW, clockH, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Clock rim
+                ctx.strokeStyle = '#3a2810';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Clock hands
+                ctx.strokeStyle = '#3a2810';
+                ctx.lineWidth = 1;
+                const hand1Angle = rng() * Math.PI * 2;
+                const hand2Angle = rng() * Math.PI * 2;
+                ctx.beginPath();
+                ctx.moveTo(clockX, clockY);
+                ctx.lineTo(clockX + Math.cos(hand1Angle) * clockW * 0.5, clockY + Math.sin(hand1Angle) * clockH * 0.5);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(clockX, clockY);
+                ctx.lineTo(clockX + Math.cos(hand2Angle) * clockW * 0.3, clockY + Math.sin(hand2Angle) * clockH * 0.3);
+                ctx.stroke();
+
+                // Melt drip
+                ctx.fillStyle = '#a89a70';
+                const dripY = clockY + clockH + 5;
+                ctx.beginPath();
+                ctx.ellipse(clockX, dripY, clockW * 0.4, 8, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // ===== FLOATING TABLE =====
+            if (rng() > 0.3) {
+                const tableX = rng() * size * 0.3 + size * 0.35;
+                const tableY = horizonY - 15;
+                const tableW = rng() * 15 + 15;
+                const tableH = 3;
+
+                ctx.fillStyle = '#8b7355';
+                ctx.fillRect(tableX - tableW / 2, tableY, tableW, tableH);
+
+                // Drooping legs
+                const legCount = Math.floor(rng() * 2) + 2;
+                ctx.strokeStyle = '#6b5345';
+                ctx.lineWidth = 2;
+                for (let l = 0; l < legCount; l++) {
+                    const legX = tableX - tableW / 2 + (tableW / (legCount + 1)) * (l + 1);
+                    const legY = tableY + tableH;
+                    const dripLen = rng() * 15 + 10;
+                    const angle = (rng() - 0.5) * 0.3;
+                    ctx.beginPath();
+                    ctx.moveTo(legX, legY);
+                    ctx.lineTo(legX + Math.sin(angle) * dripLen, legY + dripLen);
+                    ctx.stroke();
+                }
+            }
+
+            // ===== WRONG-DIRECTION SHADOWS =====
+            if (rng() > 0.4) {
+                const shadowCount = Math.floor(rng() * 3) + 1;
+                for (let s = 0; s < shadowCount; s++) {
+                    const shadowX = rng() * size;
+                    const shadowY = horizonY + rng() * (size - horizonY) * 0.6;
+                    const shadowLen = rng() * 30 + 15;
+                    const angle = (rng() * Math.PI * 2) - Math.PI;
+
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+                    ctx.lineWidth = 2 + rng() * 2;
+                    ctx.beginPath();
+                    ctx.moveTo(shadowX, shadowY);
+                    ctx.lineTo(shadowX + Math.cos(angle) * shadowLen, shadowY + Math.sin(angle) * shadowLen);
+                    ctx.stroke();
+                }
+            }
+
+            // ===== SOLITARY FIGURE OR OBELISK =====
+            if (rng() > 0.5) {
+                const figureX = rng() * size;
+                const figureY = horizonY - 5;
+                const figureH = rng() * 20 + 15;
+
+                if (rng() > 0.5) {
+                    // Silhouette
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.beginPath();
+                    ctx.moveTo(figureX, figureY);
+                    ctx.lineTo(figureX - 3, figureY - figureH);
+                    ctx.lineTo(figureX + 3, figureY - figureH);
+                    ctx.closePath();
+                    ctx.fill();
+                } else {
+                    // Obelisk (pale monolith)
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                    ctx.fillRect(figureX - 2, figureY - figureH, 4, figureH);
+                }
+            }
+
+            // ===== FLOATING EYE =====
+            if (rng() > 0.6) {
+                const eyeX = rng() * size;
+                const eyeY = horizonY - 25 - rng() * 15;
+                const eyeSize = rng() * 6 + 4;
+
+                // Sclera (white)
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.ellipse(eyeX, eyeY, eyeSize, eyeSize * 0.8, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Iris
+                const irisColor = `hsl(${rng() * 360}, 100%, 50%)`;
+                ctx.fillStyle = irisColor;
+                ctx.beginPath();
+                ctx.ellipse(eyeX, eyeY, eyeSize * 0.6, eyeSize * 0.5, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Pupil
+                ctx.fillStyle = '#000000';
+                ctx.beginPath();
+                ctx.arc(eyeX, eyeY, eyeSize * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // ===== GROUND REFLECTION =====
+            if (rng() > 0.55) {
+                const reflectStart = Math.floor(horizonY);
+                const reflectEnd = Math.floor(horizonY + 20);
+                const imageData = ctx.getImageData(0, 0, size, Math.floor(horizonY));
+                
+                for (let y = reflectStart; y < reflectEnd && y < size; y++) {
+                    const sourceY = Math.max(0, Math.floor(horizonY - (y - reflectStart)));
+                    for (let x = 0; x < size; x++) {
+                        const sourceIdx = (sourceY * size + x) * 4;
+                        const targetIdx = (y * size + x) * 4;
+                        const imgData = ctx.getImageData(0, sourceY, size, 1).data;
+                        
+                        ctx.fillStyle = `rgba(${imgData[0]}, ${imgData[1]}, ${imgData[2]}, ${imgData[3] * (0.25 + rng() * 0.3) / 255})`;
+                        ctx.fillRect(x, y, 1, 1);
+                    }
+                }
+            }
+
+            return canvas;
+        }
+
+        // ===== SCENE SETUP =====
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0608);
+        scene.fog = new THREE.FogExp2(0x0a0608, 0.045);
+
+        const canvas = document.querySelector('canvas') || document.createElement('canvas');
+        document.body.appendChild(canvas);
+
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1.7, 0);
+
+        // ===== LIGHTING =====
+        const ambientLight = new THREE.AmbientLight(0x1a0f08, 1.2);
+        scene.add(ambientLight);
+
+        // ===== GALLERY CORRIDOR =====
+        const corridorWidth = 6;
+        const corridorHeight = 4;
+        const corridorLength = 200;
+
+        // Floor
+        const floorGeometry = new THREE.PlaneGeometry(corridorWidth, corridorLength);
+        const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x0d0a06 });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = 0;
+        scene.add(floor);
+
+        // Ceiling
+        const ceilingGeometry = new THREE.PlaneGeometry(corridorWidth, corridorLength);
+        const ceilingMaterial = new THREE.MeshLambertMaterial({ color: 0x100d0a });
+        const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+        ceiling.rotation.x = Math.PI / 2;
+        ceiling.position.y = corridorHeight;
+        scene.add(ceiling);
+
+        // Left wall
+        const leftWallGeometry = new THREE.PlaneGeometry(corridorLength, corridorHeight);
+        const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x1a1208 });
+        const leftWall = new THREE.Mesh(leftWallGeometry, wallMaterial);
+        leftWall.rotation.y = Math.PI / 2;
+        leftWall.position.x = -corridorWidth / 2;
+        scene.add(leftWall);
+
+        // Right wall
+        const rightWall = new THREE.Mesh(leftWallGeometry, wallMaterial);
+        rightWall.rotation.y = Math.PI / 2;
+        rightWall.position.x = corridorWidth / 2;
+        scene.add(rightWall);
+
+        // Back wall
+        const backWallGeometry = new THREE.PlaneGeometry(corridorWidth, corridorHeight);
+        const backWall = new THREE.Mesh(backWallGeometry, wallMaterial);
+        backWall.position.z = -corridorLength / 2;
+        scene.add(backWall);
+
+        // Front wall
+        const frontWall = new THREE.Mesh(backWallGeometry, wallMaterial);
+        frontWall.position.z = corridorLength / 2;
+        scene.add(frontWall);
+
+        // ===== GOLD MOLDING =====
+        const moldingWidth = 0.15;
+        const moldingHeight = 0.1;
+
+        const moldingGeometries = [];
+        for (let z = -corridorLength / 2 + 1; z < corridorLength / 2; z += 1) {
+            // Floor molding left
+            const moldFL = new THREE.BoxGeometry(moldingWidth, moldingHeight, 1);
+            const moldFLMesh = new THREE.Mesh(moldFL, new THREE.MeshLambertMaterial({ color: 0x3a2a10 }));
+            moldFLMesh.position.set(-corridorWidth / 2 + moldingWidth / 2, moldingHeight / 2, z);
+            scene.add(moldFLMesh);
+
+            // Floor molding right
+            const moldFR = new THREE.BoxGeometry(moldingWidth, moldingHeight, 1);
+            const moldFRMesh = new THREE.Mesh(moldFR, new THREE.MeshLambertMaterial({ color: 0x3a2a10 }));
+            moldFRMesh.position.set(corridorWidth / 2 - moldingWidth / 2, moldingHeight / 2, z);
+            scene.add(moldFRMesh);
+
+            // Ceiling molding left
+            const moldCL = new THREE.BoxGeometry(moldingWidth, moldingHeight, 1);
+            const moldCLMesh = new THREE.Mesh(moldCL, new THREE.MeshLambertMaterial({ color: 0x3a2a10 }));
+            moldCLMesh.position.set(-corridorWidth / 2 + moldingWidth / 2, corridorHeight - moldingHeight / 2, z);
+            scene.add(moldCLMesh);
+
+            // Ceiling molding right
+            const moldCR = new THREE.BoxGeometry(moldingWidth, moldingHeight, 1);
+            const moldCRMesh = new THREE.Mesh(moldCR, new THREE.MeshLambertMaterial({ color: 0x3a2a10 }));
+            moldCRMesh.position.set(corridorWidth / 2 - moldingWidth / 2, corridorHeight - moldingHeight / 2, z);
+            scene.add(moldCRMesh);
+        }
+
+        // ===== FLOOR RUNNER =====
+        const runnerGeometry = new THREE.PlaneGeometry(0.8, corridorLength);
+        const runnerMaterial = new THREE.MeshLambertMaterial({ color: 0x1a0a04 });
+        const runner = new THREE.Mesh(runnerGeometry, runnerMaterial);
+        runner.rotation.x = -Math.PI / 2;
+        runner.position.y = 0.01;
+        scene.add(runner);
+
+        // ===== PAINTINGS & FRAMES =====
+        const paintingSpacing = 3.5;
+        const paintingSize = 1.6;
+        const paintingHeight = 1.8;
+        let paintingIndex = 0;
+
+        for (let z = -corridorLength / 2 + 5; z < corridorLength / 2; z += paintingSpacing) {
+            const isLeftSide = Math.floor(paintingIndex / 2) % 2 === 0;
+            const sideX = isLeftSide ? -corridorWidth / 2 + 0.3 : corridorWidth / 2 - 0.3;
+
+            // Painting canvas texture
+            const paintCanvas = generatePaintingCanvas(paintingIndex);
+            const texture = new THREE.CanvasTexture(paintCanvas);
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestFilter;
+
+            const paintMat = new THREE.MeshLambertMaterial({ map: texture });
+            const paintGeom = new THREE.PlaneGeometry(paintingSize, paintingSize);
+            const painting = new THREE.Mesh(paintGeom, paintMat);
+            painting.rotation.y = isLeftSide ? -Math.PI / 2 : Math.PI / 2;
+            painting.position.set(sideX, paintingHeight, z);
+            painting.userData.paintingIndex = paintingIndex;
+            painting.userData.title = generatePaintingTitle(paintingIndex);
+            scene.add(painting);
+
+            // Frame
+            const frameWidth = paintingSize + 0.25;
+            const frameHeight = paintingSize + 0.25;
+            const frameThickness = 0.08;
+            const frameColor = (Math.floor(paintingIndex / 3) % 2 === 0) ? 0x5a3f12 : 0x8a6020;
+            const frameMat = new THREE.MeshLambertMaterial({ color: frameColor });
+
+            // Frame parts
+            const frameSides = [
+                // Top
+                { pos: [0, paintingSize / 2 + frameThickness / 2, frameThickness / 2], scale: [frameWidth, frameThickness, frameThickness] },
+                // Bottom
+                { pos: [0, -paintingSize / 2 - frameThickness / 2, frameThickness / 2], scale: [frameWidth, frameThickness, frameThickness] },
+                // Left
+                { pos: [-paintingSize / 2 - frameThickness / 2, 0, frameThickness / 2], scale: [frameThickness, frameHeight, frameThickness] },
+                // Right
+                { pos: [paintingSize / 2 + frameThickness / 2, 0, frameThickness / 2], scale: [frameThickness, frameHeight, frameThickness] }
+            ];
+
+            frameSides.forEach(framePart => {
+                const frameGeom = new THREE.BoxGeometry(...framePart.scale);
+                const frame = new THREE.Mesh(frameGeom, frameMat);
+                frame.position.set(sideX + framePart.pos[0], paintingHeight + framePart.pos[1], z + framePart.pos[2]);
+                frame.rotation.y = isLeftSide ? -Math.PI / 2 : Math.PI / 2;
+                scene.add(frame);
+            });
+
+            // Spotlight
+            const spotLight = new THREE.SpotLight(0xffe8a0, 1.2, 8, Math.PI / 6, 0.5, 1);
+            spotLight.position.set(sideX, paintingHeight + 1.5, z);
+            spotLight.target.position.copy(painting.position);
+            scene.add(spotLight);
+            scene.add(spotLight.target);
+
+            paintingIndex++;
+        }
+
+        // ===== PAINTING TITLE GENERATOR =====
+        function generatePaintingTitle(index) {
+            const prefixes = [
+                "The Persistence of", "Memory Without", "Clocks of", "Dreams in",
+                "The Weight of", "Infinite", "Melting", "Fragmented", "The Architecture of",
+                "Silent", "Recursive", "The Geometry of", "Dissolved", "Forgotten", "Eternal"
+            ];
+
+            const nouns = [
+                "Memory", "Time", "Shadows", "Infinity", "Silence", "The Void",
+                "Horizons", "Dissolution", "The Dreamer", "Repetition", "The Library",
+                "Continuity", "The Self"
+            ];
+
+            const attributions = [
+                "Anonymous", "Unknown, c.∞", "Attributed to None", "Found in Room",
+                "Gallery of Forking Paths", "Dreamt, not painted", "∞ — ∞", "Cat. No.",
+                "Combinatorial Study"
+            ];
+
+            const rng = mulberry32(index + 999);
+            const prefix = prefixes[Math.floor(rng() * prefixes.length)];
+            const noun = nouns[Math.floor(rng() * nouns.length)];
+            const attribution = attributions[Math.floor(rng() * attributions.length)];
+            const catNo = Math.floor(rng() * 10000);
+
+            return `${prefix} ${noun}  ·  ${attribution} #${catNo}`;
+        }
+
+        // ===== FIRST-PERSON CONTROLS =====
+        const controls = {
+            forward: false,
+            backward: false,
+            left: false,
+            right: false,
+            yaw: 0,
+            pitch: 0,
+            speed: 3.5
+        };
+
+        let pointerLocked = false;
+
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w') controls.forward = true;
+            if (key === 's') controls.backward = true;
+            if (key === 'a') controls.left = true;
+            if (key === 'd') controls.right = true;
+            if (key === 'arrowup') controls.forward = true;
+            if (key === 'arrowdown') controls.backward = true;
+            if (key === 'arrowleft') controls.left = true;
+            if (key === 'arrowright') controls.right = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w') controls.forward = false;
+            if (key === 's') controls.backward = false;
+            if (key === 'a') controls.left = false;
+            if (key === 'd') controls.right = false;
+            if (key === 'arrowup') controls.forward = false;
+            if (key === 'arrowdown') controls.backward = false;
+            if (key === 'arrowleft') controls.left = false;
+            if (key === 'arrowright') controls.right = false;
+        });
+
+        canvas.addEventListener('click', () => {
+            canvas.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            pointerLocked = document.pointerLockElement === canvas;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (pointerLocked) {
+                controls.yaw -= e.movementX * 0.005;
+                controls.pitch -= e.movementY * 0.005;
+                controls.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, controls.pitch));
+            }
+        });
+
+        // Touch controls
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            const touchDeltaX = e.touches[0].clientX - touchStartX;
+            const touchDeltaY = e.touches[0].clientY - touchStartY;
+
+            controls.yaw -= touchDeltaX * 0.002;
+            controls.pitch -= touchDeltaY * 0.002;
+            controls.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, controls.pitch));
+
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        });
+
+        // ===== ANIMATION LOOP =====
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // Update camera rotation
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = controls.yaw;
+            camera.rotation.x = controls.pitch;
+
+            // Update camera position
+            const moveDirection = new THREE.Vector3();
+            if (controls.forward) moveDirection.z -= 1;
+            if (controls.backward) moveDirection.z += 1;
+            if (controls.left) moveDirection.x -= 1;
+            if (controls.right) moveDirection.x += 1;
+
+            moveDirection.normalize();
+            moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), controls.yaw);
+            moveDirection.multiplyScalar(controls.speed * delta);
+
+            const newPos = camera.position.clone().add(moveDirection);
+            newPos.x = Math.max(-corridorWidth / 2 + 0.2, Math.min(corridorWidth / 2 - 0.2, newPos.x));
+            newPos.z = Math.max(-corridorLength / 2, Math.min(corridorLength / 2, newPos.z));
+            newPos.y = 1.7;
+            camera.position.copy(newPos);
+
+            // Check for nearby paintings
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const allObjects = scene.children.filter(obj => obj.userData.paintingIndex !== undefined);
+            const intersects = raycaster.intersectObjects(allObjects, false);
+
+            const plaqueEl = document.getElementById('plaque');
+            if (intersects.length > 0 && intersects[0].distance < 2.2) {
+                const painting = intersects[0].object;
+                plaqueEl.textContent = painting.userData.title;
+                plaqueEl.classList.add('visible');
+            } else {
+                plaqueEl.classList.remove('visible');
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ===== WINDOW RESIZE =====
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
