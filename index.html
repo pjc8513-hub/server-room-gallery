@@ -501,6 +501,10 @@ function populatePaintings(offset) {
 
 // initial population with a random base index
 populatePaintings(baseIndex);
+
+// ensure orientation variables exist before using them
+let yaw = 0, pitch = 0;
+
 // start the camera at a random painting as well
 warpToRandomLocation();
 
@@ -534,7 +538,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup',   e => keys[e.code] = false);
 
-let yaw = 0, pitch = 0, locked = false;
+let locked = false;
 canvas.addEventListener('click', () => canvas.requestPointerLock());
 document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; });
 document.addEventListener('mousemove', e => {
