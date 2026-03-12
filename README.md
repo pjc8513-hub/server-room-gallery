@@ -23,7 +23,8 @@ An infinite, procedurally generated surrealist art gallery inspired by Jorge Lui
 ## 🏛️ Gallery Features
 
 - **Infinite Corridor**: A 6×4 unit hallway stretching 200 units deep with classical molding and dark wood runner
-- **64 Paintings**: Procedurally generated surrealist canvases with deterministic seeded RNG
+- **64 Paintings**: Procedurally generated surrealist canvases with deterministic seeded RNG (the visible set is offset by a random index each load)
+- **Random Start & Warp**: When the page opens you may begin in a different mathematical region; press **`R`** to jump to a new random location (including a new lateral position and view direction) and regenerate the artwork
 - **Painting Elements**:
   - Atmospheric sky gradients (twilight, void, bruised purple, arctic gold)
   - Melting clocks with drooping drips (à la Dalí)

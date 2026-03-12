@@ -436,57 +436,102 @@ const frameMats = [
 ];
 const plaqueData = [];
 
-let idx = 0;
-for (let z = -(1.5); z > -CL; z -= paintingSpacing) {
-    const side = idx % 2 === 0 ? -1 : 1;
-    const x = side * (CW/2 - 0.06);
-    const seed = idx;
+// group to hold everything related to paintings so we can clear/regenerate easily
+const paintingsGroup = new THREE.Group();
+scene.add(paintingsGroup);
 
-    const paintCanvas = generatePaintingCanvas(seed);
-    const tex = new THREE.CanvasTexture(paintCanvas);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
+// base offset added to every index; randomised on load or when warping
+let baseIndex = Math.floor(Math.random() * 1000000);
 
-    const paintMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(PAINT_W, PAINT_H),
-        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0 })
-    );
-    paintMesh.rotation.y = side > 0 ? -Math.PI/2 : Math.PI/2;
-    paintMesh.position.set(x, 1.8, z);
-    paintMesh.userData.title = generatePaintingTitle(seed);
-    scene.add(paintMesh);
-    plaqueData.push({ z, side, title: paintMesh.userData.title });
+function populatePaintings(offset) {
+    // wipe old items
+    while (paintingsGroup.children.length) {
+        paintingsGroup.remove(paintingsGroup.children[0]);
+    }
+    plaqueData.length = 0;
 
-    // Frame
-    const fm = frameMats[Math.floor(idx / 3) % 2];
-    const FT = 0.06;
-    const frameGroup = new THREE.Group();
-    frameGroup.rotation.y = side > 0 ? -Math.PI/2 : Math.PI/2;
-    frameGroup.position.set(x, 1.8, z);
-    [
-        [PAINT_W + FT*2, FT, 0,              PAINT_H/2 + FT/2],
-        [PAINT_W + FT*2, FT, 0,             -PAINT_H/2 - FT/2],
-        [FT, PAINT_H,       -PAINT_W/2 - FT/2, 0],
-        [FT, PAINT_H,        PAINT_W/2 + FT/2, 0],
-    ].forEach(([w, h, px, py]) => {
-        const piece = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), fm);
-        piece.position.set(px, py, -0.02);
-        frameGroup.add(piece);
-    });
-    scene.add(frameGroup);
+    let idx = 0;
+    for (let z = -(1.5); z > -CL; z -= paintingSpacing) {
+        const side = idx % 2 === 0 ? -1 : 1;
+        const x = side * (CW/2 - 0.06);
+        const seed = offset + idx;
 
-    // Spotlight
-    const spot = new THREE.SpotLight(0xffe8a0, 1.2, 8, Math.PI/6, 0.5, 1.5);
-    spot.position.set(side * (CW/2 - 1.2), CH - 0.3, z);
-    spot.target.position.set(x, 1.8, z);
-    scene.add(spot); scene.add(spot.target);
+        const paintCanvas = generatePaintingCanvas(seed);
+        const tex = new THREE.CanvasTexture(paintCanvas);
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
 
-    idx++;
+        const paintMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(PAINT_W, PAINT_H),
+            new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0 })
+        );
+        paintMesh.rotation.y = side > 0 ? -Math.PI/2 : Math.PI/2;
+        paintMesh.position.set(x, 1.8, z);
+        paintMesh.userData.title = generatePaintingTitle(seed);
+        paintingsGroup.add(paintMesh);
+        plaqueData.push({ z, side, title: paintMesh.userData.title });
+
+        // Frame
+        const fm = frameMats[Math.floor(idx / 3) % 2];
+        const FT = 0.06;
+        const frameGroup = new THREE.Group();
+        frameGroup.rotation.y = side > 0 ? -Math.PI/2 : Math.PI/2;
+        frameGroup.position.set(x, 1.8, z);
+        [
+            [PAINT_W + FT*2, FT, 0,              PAINT_H/2 + FT/2],
+            [PAINT_W + FT*2, FT, 0,             -PAINT_H/2 - FT/2],
+            [FT, PAINT_H,       -PAINT_W/2 - FT/2, 0],
+            [FT, PAINT_H,        PAINT_W/2 + FT/2, 0],
+        ].forEach(([w, h, px, py]) => {
+            const piece = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), fm);
+            piece.position.set(px, py, -0.02);
+            frameGroup.add(piece);
+        });
+        paintingsGroup.add(frameGroup);
+
+        // Spotlight
+        const spot = new THREE.SpotLight(0xffe8a0, 1.2, 8, Math.PI/6, 0.5, 1.5);
+        spot.position.set(side * (CW/2 - 1.2), CH - 0.3, z);
+        spot.target.position.set(x, 1.8, z);
+        paintingsGroup.add(spot); paintingsGroup.add(spot.target);
+
+        idx++;
+    }
+}
+
+// initial population with a random base index
+populatePaintings(baseIndex);
+// start the camera at a random painting as well
+warpToRandomLocation();
+
+// warp helpers
+function warpToRandomLocation() {
+    const count = Math.floor(CL / paintingSpacing);
+    const randIdx = Math.floor(Math.random() * count);
+    const z = -(1.5) - randIdx * paintingSpacing;
+    // pick a random lateral position within the corridor
+    const x = (Math.random() * 2 - 1) * (CW/2 - 0.4);
+    camera.position.set(x, 1.7, z + 1);
+    // randomize view direction
+    yaw = Math.random() * Math.PI * 2;
+    pitch = 0;
+}
+
+function randomizeGallery() {
+    baseIndex = Math.floor(Math.random() * 1000000);
+    populatePaintings(baseIndex);
+    warpToRandomLocation();
 }
 
 // ── Controls ──────────────────────────────────────────────────────────────────
 const keys = {};
-document.addEventListener('keydown', e => keys[e.code] = true);
+document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.key === 'r' || e.key === 'R') {
+        // randomize the set of paintings and jump to a new position
+        randomizeGallery();
+    }
+});
 document.addEventListener('keyup',   e => keys[e.code] = false);
 
 let yaw = 0, pitch = 0, locked = false;
